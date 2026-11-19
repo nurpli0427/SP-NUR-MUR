@@ -9,7 +9,15 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+const useSameOriginAuth =
+  import.meta.env.VITE_USE_SAME_ORIGIN_AUTH === 'true' && typeof window !== 'undefined';
+
+const resolvedFirebaseConfig = {
+  ...firebaseConfig,
+  authDomain: useSameOriginAuth ? window.location.host : firebaseConfig.authDomain,
+};
+
+const app = initializeApp(resolvedFirebaseConfig);
 
 // Enable IndexedDB multi-tab offline persistence on the named Firestore database
 export const db = initializeFirestore(

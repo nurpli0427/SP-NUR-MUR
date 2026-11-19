@@ -82,6 +82,7 @@ export default function App() {
   const [redirectChecked, setRedirectChecked] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [popupBlocked, setPopupBlocked] = useState(false);
+  const [redirectCookieBlocked, setRedirectCookieBlocked] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
   const [activeSection, setActiveSection] = useState<NavSection>('monitor');
@@ -120,9 +121,10 @@ export default function App() {
           sessionStorage.removeItem('carenote_redirect_attempted');
         } else if (attempted && !auth.currentUser) {
           sessionStorage.removeItem('carenote_redirect_attempted');
-          setPopupBlocked(true);
+          setPopupBlocked(false);
+          setRedirectCookieBlocked(true);
           setAuthError(
-            '已完成 Google 跳轉，但瀏覽器阻擋跨網域暫存憑證（第三方 Cookie）。請點擊網址列右側允許彈出式視窗，再重新點擊主登入按鈕。'
+            '已完成 Google 跳轉，但瀏覽器阻擋跨網域暫存憑證（第三方 Cookie），導致登入狀態無法回傳。'
           );
         }
       })
@@ -152,6 +154,7 @@ export default function App() {
           setProfile(userProfile);
           setAuthError(null);
           setPopupBlocked(false);
+          setRedirectCookieBlocked(false);
         } catch (err) {
           setAuthError(err instanceof Error ? err.message : '載入使用者權限失敗');
         }
@@ -251,6 +254,7 @@ export default function App() {
   const handleSignIn = async () => {
     setAuthError(null);
     setPopupBlocked(false);
+    setRedirectCookieBlocked(false);
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
@@ -343,6 +347,7 @@ export default function App() {
           onSignInRedirect={handleSignInRedirect}
           error={authError}
           popupBlocked={popupBlocked}
+          redirectCookieBlocked={redirectCookieBlocked}
           isEmbeddedIframe={isEmbeddedIframe}
         />
       </ErrorBoundary>
