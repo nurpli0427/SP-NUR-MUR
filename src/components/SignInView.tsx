@@ -6,6 +6,7 @@ interface SignInViewProps {
   onSignInRedirect: () => Promise<void>;
   error: string | null;
   popupBlocked: boolean;
+  isEmbeddedIframe: boolean;
 }
 
 export const SignInView: React.FC<SignInViewProps> = ({
@@ -13,6 +14,7 @@ export const SignInView: React.FC<SignInViewProps> = ({
   onSignInRedirect,
   error,
   popupBlocked,
+  isEmbeddedIframe,
 }) => {
   const [loading, setLoading] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
@@ -84,7 +86,9 @@ export const SignInView: React.FC<SignInViewProps> = ({
               <div>{error}</div>
               {popupBlocked && (
                 <div className="text-xs text-red-700 dark:text-red-300/90 leading-relaxed">
-                  排查建議：點擊瀏覽器網址列右側「封鎖彈出式視窗」圖示並設為「永遠允許」，或使用下方「改用整頁跳轉登入」（適用於獨立瀏覽器分頁與 Vercel 部署網址）。
+                  {isEmbeddedIframe
+                    ? '提示：內嵌預覽視窗受瀏覽器安全限制容易攔截彈窗，建議點擊下方「在新分頁開啟並登入」，系統將自動切換為相容的整頁跳轉驗證。'
+                    : '提示：請於瀏覽器網址列右側點擊「封鎖彈出式視窗」圖示並設為「永遠允許」，或點擊下方「改用整頁跳轉登入 (Redirect)」。'}
                 </div>
               )}
             </div>
@@ -101,7 +105,19 @@ export const SignInView: React.FC<SignInViewProps> = ({
               {loading ? '正在驗證臨床帳號...' : '使用 Google 醫療人員帳號登入'}
             </button>
 
-            {popupBlocked && (
+            {popupBlocked && isEmbeddedIframe && typeof window !== 'undefined' && (
+              <a
+                href={window.location.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-teal-800 dark:text-teal-200 bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800 hover:bg-teal-100 dark:hover:bg-teal-900/50 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <ExternalLink className="w-4 h-4" />
+                在新分頁開啟並登入
+              </a>
+            )}
+
+            {popupBlocked && !isEmbeddedIframe && (
               <button
                 type="button"
                 onClick={() => void handleRedirectClick()}

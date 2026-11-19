@@ -79,6 +79,7 @@ export default function App() {
 
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [redirectChecked, setRedirectChecked] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [popupBlocked, setPopupBlocked] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -112,16 +113,33 @@ export default function App() {
 
   // Complete any pending signInWithRedirect result
   useEffect(() => {
-    void getRedirectResult(auth).catch((err) => {
-      const code = (err as { code?: string })?.code || '';
-      if (code === 'auth/unauthorized-domain') {
-        setAuthError(
-          `目前網域（${window.location.hostname}）尚未加入 Firebase 授權網域。請至 Firebase Console (sp-nur-mur) → Authentication → Settings → Authorized domains 新增此網域。`
-        );
-      } else {
-        setAuthError(err instanceof Error ? err.message : 'Google 跳轉登入失敗，請再試一次。');
-      }
-    });
+    void getRedirectResult(auth)
+      .then((result) => {
+        const attempted = sessionStorage.getItem('carenote_redirect_attempted') === '1';
+        if (result?.user) {
+          sessionStorage.removeItem('carenote_redirect_attempted');
+        } else if (attempted && !auth.currentUser) {
+          sessionStorage.removeItem('carenote_redirect_attempted');
+          setPopupBlocked(true);
+          setAuthError(
+            '已完成 Google 跳轉，但瀏覽器阻擋跨網域暫存憑證（第三方 Cookie）。請點擊網址列右側允許彈出式視窗，再重新點擊主登入按鈕。'
+          );
+        }
+      })
+      .catch((err) => {
+        sessionStorage.removeItem('carenote_redirect_attempted');
+        const code = (err as { code?: string })?.code || '';
+        if (code === 'auth/unauthorized-domain') {
+          setAuthError(
+            `目前網域（${window.location.hostname}）尚未加入 Firebase 授權網域。請至 Firebase Console (sp-nur-mur) → Authentication → Settings → Authorized domains 新增此網域。`
+          );
+        } else {
+          setAuthError(err instanceof Error ? err.message : 'Google 跳轉登入失敗，請再試一次。');
+        }
+      })
+      .finally(() => {
+        setRedirectChecked(true);
+      });
   }, []);
 
   // Listen to Firebase Auth state
@@ -222,6 +240,14 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [profile, reminders]);
 
+  const isEmbeddedIframe = (() => {
+    try {
+      return window.self !== window.top;
+    } catch {
+      return true;
+    }
+  })();
+
   const handleSignIn = async () => {
     setAuthError(null);
     setPopupBlocked(false);
@@ -233,12 +259,25 @@ export default function App() {
         code === 'auth/popup-blocked' ||
         code === 'auth/operation-not-supported-in-this-environment'
       ) {
+        if (!isEmbeddedIframe) {
+          try {
+            sessionStorage.setItem('carenote_redirect_attempted', '1');
+            await signInWithRedirect(auth, googleProvider);
+            return;
+          } catch (redirectErr) {
+            sessionStorage.removeItem('carenote_redirect_attempted');
+            setPopupBlocked(true);
+            setAuthError(
+              redirectErr instanceof Error
+                ? redirectErr.message
+                : '瀏覽器封鎖了彈出視窗，且無法啟動跳轉登入，請允許此網站的彈出式視窗後再試。'
+            );
+            return;
+          }
+        }
         setPopupBlocked(true);
-        const inIframe = window.self !== window.top;
         setAuthError(
-          inIframe
-            ? '瀏覽器封鎖了 Google 登入彈出視窗（auth/popup-blocked）。請於瀏覽器網址列右側設為「永遠允許彈出式視窗」後重試，或於獨立分頁開啟後使用「整頁跳轉登入」。'
-            : '瀏覽器封鎖了 Google 登入彈出視窗（auth/popup-blocked）。請允許此網站彈出視窗，或點擊下方「改用整頁跳轉登入 (Redirect)」。'
+          '目前預覽內嵌視窗的彈出視窗遭瀏覽器封鎖（auth/popup-blocked）。請於瀏覽器網址列右側點擊「允許彈出式視窗」後重試，或點擊下方「在新分頁開啟並登入」。'
         );
       } else if (code === 'auth/unauthorized-domain') {
         setAuthError(
@@ -258,8 +297,10 @@ export default function App() {
   const handleSignInRedirect = async () => {
     setAuthError(null);
     try {
+      sessionStorage.setItem('carenote_redirect_attempted', '1');
       await signInWithRedirect(auth, googleProvider);
     } catch (err) {
+      sessionStorage.removeItem('carenote_redirect_attempted');
       setAuthError(
         err instanceof Error
           ? err.message
@@ -284,7 +325,7 @@ export default function App() {
     }
   };
 
-  if (!authReady) {
+  if (!authReady || !redirectChecked) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
         <div className="text-sm text-slate-500 dark:text-slate-400">
@@ -302,6 +343,7 @@ export default function App() {
           onSignInRedirect={handleSignInRedirect}
           error={authError}
           popupBlocked={popupBlocked}
+          isEmbeddedIframe={isEmbeddedIframe}
         />
       </ErrorBoundary>
     );
