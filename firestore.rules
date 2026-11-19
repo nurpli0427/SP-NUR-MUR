@@ -1,0 +1,531 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Global Primitives & Identity Helpers
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'nurpli0427@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isWriterRole() {
+      return isAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role != 'supervisor_viewer'
+      );
+    }
+
+    function isValidRole(role) {
+      return role in ['head_nurse', 'special_nurse', 'supervisor_viewer'];
+    }
+
+    function isValidBoundedUidList(lst) {
+      return lst is list &&
+        lst.size() >= 1 &&
+        lst.size() <= 10 &&
+        lst[0] is string &&
+        lst[0].size() >= 1 &&
+        lst[0].size() <= 128;
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Blueprints
+    // -------------------------------------------------------------------------
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'department', 'licenseNo', 'signatureText', 'pushEnabled', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'department', 'licenseNo', 'signatureText', 'pushEnabled', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        isValidRole(data.role) &&
+        data.department is string && data.department.size() <= 80 &&
+        data.licenseNo is string && data.licenseNo.size() <= 40 &&
+        data.signatureText is string && data.signatureText.size() <= 120 &&
+        data.pushEnabled is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStaffPublic(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'department', 'active', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'role', 'department', 'active', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        isValidRole(data.role) &&
+        data.department is string && data.department.size() <= 80 &&
+        data.active is bool &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRegistry(data, userId) {
+      return data.keys().hasAll(['uid', 'grantedBy', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'grantedBy', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        isValidId(data.grantedBy) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidPatient(data, patientId) {
+      return data.keys().hasAll([
+          'patientId', 'mrn', 'fullName', 'bedNumber', 'ward', 'age', 'gender',
+          'diagnosis', 'careLevel', 'allergies', 'assignedNurseIds', 'primaryNurseId',
+          'status', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'patientId', 'mrn', 'fullName', 'bedNumber', 'ward', 'age', 'gender',
+          'diagnosis', 'careLevel', 'allergies', 'assignedNurseIds', 'primaryNurseId',
+          'status', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.patientId) &&
+        data.patientId == patientId &&
+        data.mrn is string && data.mrn.size() >= 2 && data.mrn.size() <= 32 &&
+        data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 80 &&
+        data.bedNumber is string && data.bedNumber.size() >= 1 && data.bedNumber.size() <= 32 &&
+        data.ward is string && data.ward.size() >= 1 && data.ward.size() <= 60 &&
+        data.age is number && data.age >= 0 && data.age <= 130 &&
+        data.gender in ['M', 'F', 'Other'] &&
+        data.diagnosis is string && data.diagnosis.size() >= 1 && data.diagnosis.size() <= 240 &&
+        data.careLevel in ['ICU', 'Special', 'PostOp', 'Hospice'] &&
+        data.allergies is string && data.allergies.size() <= 240 &&
+        isValidBoundedUidList(data.assignedNurseIds) &&
+        isValidId(data.primaryNurseId) &&
+        data.status in ['active', 'discharged'] &&
+        isValidId(data.createdBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVitals(v) {
+      return v is map &&
+        v.keys().hasAll(['temperature', 'heartRate', 'respiratoryRate', 'bpSystolic', 'bpDiastolic', 'spo2', 'painScore']) &&
+        v.keys().hasOnly(['temperature', 'heartRate', 'respiratoryRate', 'bpSystolic', 'bpDiastolic', 'spo2', 'painScore']) &&
+        v.temperature is number && v.temperature >= 30 && v.temperature <= 45 &&
+        v.heartRate is number && v.heartRate >= 20 && v.heartRate <= 250 &&
+        v.respiratoryRate is number && v.respiratoryRate >= 4 && v.respiratoryRate <= 80 &&
+        v.bpSystolic is number && v.bpSystolic >= 40 && v.bpSystolic <= 300 &&
+        v.bpDiastolic is number && v.bpDiastolic >= 20 && v.bpDiastolic <= 200 &&
+        v.spo2 is number && v.spo2 >= 40 && v.spo2 <= 100 &&
+        v.painScore is number && v.painScore >= 0 && v.painScore <= 10;
+    }
+
+    function isValidSoap(s) {
+      return s is map &&
+        s.keys().hasAll(['subjective', 'objective', 'assessment', 'plan']) &&
+        s.keys().hasOnly(['subjective', 'objective', 'assessment', 'plan']) &&
+        s.subjective is string && s.subjective.size() <= 3000 &&
+        s.objective is string && s.objective.size() <= 3000 &&
+        s.assessment is string && s.assessment.size() <= 3000 &&
+        s.plan is string && s.plan.size() <= 3000;
+    }
+
+    function isValidDart(d) {
+      return d is map &&
+        d.keys().hasAll(['data', 'action', 'response', 'teaching']) &&
+        d.keys().hasOnly(['data', 'action', 'response', 'teaching']) &&
+        d.data is string && d.data.size() <= 3000 &&
+        d.action is string && d.action.size() <= 3000 &&
+        d.response is string && d.response.size() <= 3000 &&
+        d.teaching is string && d.teaching.size() <= 3000;
+    }
+
+    function isValidCareRecord(data, recordId) {
+      return data.keys().hasAll([
+          'recordId', 'patientId', 'patientName', 'mrn', 'bedNumber', 'format', 'shift',
+          'focusTitle', 'status', 'assignedNurseIds', 'authorId', 'authorName',
+          'signedBy', 'signedByName', 'signatureText', 'signedAtMs',
+          'amendmentReason', 'amendedBy', 'amendedByName', 'amendedAtMs',
+          'vitals', 'soap', 'dart', 'hasAlert', 'alertReason', 'offlineOriginId',
+          'recordedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'recordId', 'patientId', 'patientName', 'mrn', 'bedNumber', 'format', 'shift',
+          'focusTitle', 'status', 'assignedNurseIds', 'authorId', 'authorName',
+          'signedBy', 'signedByName', 'signatureText', 'signedAtMs',
+          'amendmentReason', 'amendedBy', 'amendedByName', 'amendedAtMs',
+          'vitals', 'soap', 'dart', 'hasAlert', 'alertReason', 'offlineOriginId',
+          'recordedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.recordId) &&
+        data.recordId == recordId &&
+        isValidId(data.patientId) &&
+        data.patientName is string && data.patientName.size() >= 1 && data.patientName.size() <= 80 &&
+        data.mrn is string && data.mrn.size() >= 2 && data.mrn.size() <= 32 &&
+        data.bedNumber is string && data.bedNumber.size() >= 1 && data.bedNumber.size() <= 32 &&
+        data.format in ['SOAP', 'DART'] &&
+        data.shift in ['Day', 'Evening', 'Night'] &&
+        data.focusTitle is string && data.focusTitle.size() >= 1 && data.focusTitle.size() <= 120 &&
+        data.status in ['draft', 'pending_review', 'signed', 'alert'] &&
+        isValidBoundedUidList(data.assignedNurseIds) &&
+        isValidId(data.authorId) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+        data.signedBy is string && data.signedBy.size() <= 128 &&
+        data.signedByName is string && data.signedByName.size() <= 80 &&
+        data.signatureText is string && data.signatureText.size() <= 120 &&
+        data.signedAtMs is number && data.signedAtMs >= 0 &&
+        data.amendmentReason is string && data.amendmentReason.size() <= 240 &&
+        data.amendedBy is string && data.amendedBy.size() <= 128 &&
+        data.amendedByName is string && data.amendedByName.size() <= 80 &&
+        data.amendedAtMs is number && data.amendedAtMs >= 0 &&
+        isValidVitals(data.vitals) &&
+        isValidSoap(data.soap) &&
+        isValidDart(data.dart) &&
+        data.hasAlert is bool &&
+        data.alertReason is string && data.alertReason.size() <= 240 &&
+        data.offlineOriginId is string && data.offlineOriginId.size() <= 128 &&
+        data.recordedAtMs is number && data.recordedAtMs > 0 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidReminder(data, reminderId) {
+      return data.keys().hasAll([
+          'reminderId', 'patientId', 'patientName', 'bedNumber', 'title', 'category',
+          'dueAtMs', 'repeatMinutes', 'status', 'assignedNurseIds', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'reminderId', 'patientId', 'patientName', 'bedNumber', 'title', 'category',
+          'dueAtMs', 'repeatMinutes', 'status', 'assignedNurseIds', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.reminderId) &&
+        data.reminderId == reminderId &&
+        isValidId(data.patientId) &&
+        data.patientName is string && data.patientName.size() >= 1 && data.patientName.size() <= 80 &&
+        data.bedNumber is string && data.bedNumber.size() >= 1 && data.bedNumber.size() <= 32 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        data.category in ['vitals', 'turning', 'medication', 'handover', 'assessment'] &&
+        data.dueAtMs is number && data.dueAtMs > 0 &&
+        data.repeatMinutes is number && data.repeatMinutes >= 0 && data.repeatMinutes <= 1440 &&
+        data.status in ['pending', 'notified', 'completed', 'snoozed'] &&
+        isValidBoundedUidList(data.assignedNurseIds) &&
+        isValidId(data.createdBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data, logId) {
+      return data.keys().hasAll(['logId', 'actorUid', 'actorName', 'action', 'targetType', 'targetId', 'summary', 'createdAt']) &&
+        data.keys().hasOnly(['logId', 'actorUid', 'actorName', 'action', 'targetType', 'targetId', 'summary', 'createdAt']) &&
+        isValidId(data.logId) &&
+        data.logId == logId &&
+        isValidId(data.actorUid) &&
+        data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 80 &&
+        data.action in [
+          'record_created', 'record_updated', 'record_signed', 'record_amended', 'record_unlocked',
+          'record_exported_pdf', 'record_exported_doc', 'patient_created', 'role_updated', 'backup_restored'
+        ] &&
+        data.targetType in ['careRecord', 'patient', 'user', 'backup'] &&
+        data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+        data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 240 &&
+        data.createdAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Rules
+    // -------------------------------------------------------------------------
+
+    // /users/{userId} - Private PII Profile (Email isolated from other nurses)
+    match /users/{userId} {
+      allow get: if isVerifiedUser() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (isOwner(userId) && incoming().role == 'special_nurse')
+        );
+      allow update: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'department', 'licenseNo', 'signatureText', 'pushEnabled', 'updatedAt'])) ||
+          (isOwner(userId) && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'licenseNo', 'signatureText', 'pushEnabled', 'updatedAt']))
+        );
+      allow delete: if false;
+    }
+
+    // /staffPublic/{userId} - Non-PII Staff Directory
+    match /staffPublic/{userId} {
+      allow get: if isVerifiedUser() && isValidId(userId);
+      allow list: if isVerifiedUser() && (isBootstrappedAdmin() || resource.data.active == true);
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidStaffPublic(incoming(), userId) &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || (isOwner(userId) && incoming().role == 'special_nurse'));
+      allow update: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidStaffPublic(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().updatedAt == request.time &&
+        (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'department', 'active', 'updatedAt'])) ||
+          (isOwner(userId) && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'active', 'updatedAt']))
+        );
+      allow delete: if false;
+    }
+
+    // /admins/{userId} - Head Nurse Admin Registry
+    match /admins/{userId} {
+      allow get: if isVerifiedUser() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isAdmin() &&
+        isValidId(userId) &&
+        isValidAdminRegistry(incoming(), userId) &&
+        incoming().grantedBy == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(userId) && userId != request.auth.uid;
+    }
+
+    // /patients/{patientId} - Patient Charts Scoped to Assigned Nurses
+    match /patients/{patientId} {
+      allow get: if isVerifiedUser() && isValidId(patientId) && (
+        isAdmin() ||
+        request.auth.uid in existing().assignedNurseIds ||
+        existing().primaryNurseId == request.auth.uid
+      );
+      allow list: if isVerifiedUser() && (
+        isBootstrappedAdmin() ||
+        request.auth.uid in resource.data.assignedNurseIds ||
+        resource.data.primaryNurseId == request.auth.uid
+      );
+      allow create: if isVerifiedUser() &&
+        isValidId(patientId) &&
+        isValidPatient(incoming(), patientId) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isWriterRole() &&
+        (isAdmin() || request.auth.uid in incoming().assignedNurseIds);
+      allow update: if isVerifiedUser() &&
+        isValidId(patientId) &&
+        isValidPatient(incoming(), patientId) &&
+        incoming().patientId == existing().patientId &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isWriterRole() &&
+        (
+          // Action 1: Head nurse or primary nurse assignment & chart administration
+          (
+            (isAdmin() || existing().primaryNurseId == request.auth.uid) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'mrn', 'fullName', 'bedNumber', 'ward', 'age', 'gender', 'diagnosis',
+              'careLevel', 'allergies', 'assignedNurseIds', 'primaryNurseId', 'status', 'updatedAt'
+            ])
+          ) ||
+          // Action 2: Assigned nurse clinical update while active
+          (
+            request.auth.uid in existing().assignedNurseIds &&
+            existing().status == 'active' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'bedNumber', 'ward', 'diagnosis', 'careLevel', 'allergies', 'status', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isAdmin() && isValidId(patientId);
+    }
+
+    // /careRecords/{recordId} - SOAP / DART Nursing Care Records
+    match /careRecords/{recordId} {
+      allow get: if isVerifiedUser() && isValidId(recordId) && (
+        isAdmin() ||
+        request.auth.uid in existing().assignedNurseIds ||
+        existing().authorId == request.auth.uid
+      );
+      allow list: if isVerifiedUser() && (
+        isBootstrappedAdmin() ||
+        request.auth.uid in resource.data.assignedNurseIds ||
+        resource.data.authorId == request.auth.uid
+      );
+      allow create: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidCareRecord(incoming(), recordId) &&
+        incoming().authorId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (incoming().status != 'signed' || incoming().signedBy == request.auth.uid) &&
+        isWriterRole() &&
+        exists(/databases/$(database)/documents/patients/$(incoming().patientId)) &&
+        incoming().assignedNurseIds == get(/databases/$(database)/documents/patients/$(incoming().patientId)).data.assignedNurseIds &&
+        (
+          isAdmin() ||
+          request.auth.uid in get(/databases/$(database)/documents/patients/$(incoming().patientId)).data.assignedNurseIds
+        );
+      allow update: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidCareRecord(incoming(), recordId) &&
+        incoming().recordId == existing().recordId &&
+        incoming().patientId == existing().patientId &&
+        incoming().authorId == existing().authorId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isWriterRole() &&
+        (
+          // Action 1: Head nurse / Admin review, sign-off, unlock, or assignment sync
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'patientName', 'mrn', 'bedNumber', 'format', 'shift', 'focusTitle', 'status',
+              'assignedNurseIds', 'signedBy', 'signedByName', 'signatureText', 'signedAtMs',
+              'amendmentReason', 'amendedBy', 'amendedByName', 'amendedAtMs',
+              'vitals', 'soap', 'dart', 'hasAlert', 'alertReason', 'recordedAtMs', 'updatedAt'
+            ])
+          ) ||
+          // Action 2: Assigned nurse edits or signs an unsigned record
+          (
+            existing().status != 'signed' &&
+            (request.auth.uid in existing().assignedNurseIds || existing().authorId == request.auth.uid) &&
+            (incoming().status != 'signed' || incoming().signedBy == request.auth.uid) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'format', 'shift', 'focusTitle', 'status', 'signedBy', 'signedByName',
+              'signatureText', 'signedAtMs', 'vitals', 'soap', 'dart', 'hasAlert',
+              'alertReason', 'recordedAtMs', 'updatedAt'
+            ])
+          ) ||
+          // Action 3: Assigned nurse amends a signed record WITH mandatory amendment reason
+          (
+            existing().status == 'signed' &&
+            (request.auth.uid in existing().assignedNurseIds || existing().authorId == request.auth.uid) &&
+            incoming().status == 'signed' &&
+            incoming().signedBy == request.auth.uid &&
+            incoming().amendmentReason is string &&
+            incoming().amendmentReason.size() >= 2 &&
+            incoming().amendmentReason.size() <= 240 &&
+            incoming().amendedBy == request.auth.uid &&
+            incoming().amendedAtMs is number &&
+            incoming().amendedAtMs > 0 &&
+            (!('amendedAtMs' in existing()) || incoming().amendedAtMs > existing().amendedAtMs) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'format', 'shift', 'focusTitle', 'status', 'signedBy', 'signedByName',
+              'signatureText', 'signedAtMs', 'amendmentReason', 'amendedBy',
+              'amendedByName', 'amendedAtMs', 'vitals', 'soap', 'dart',
+              'hasAlert', 'alertReason', 'recordedAtMs', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(recordId) && (
+        isAdmin() ||
+        (existing().authorId == request.auth.uid && existing().status == 'draft' && isWriterRole())
+      );
+    }
+
+    // /reminders/{reminderId} - Scheduled Push Reminders
+    match /reminders/{reminderId} {
+      allow get: if isVerifiedUser() && isValidId(reminderId) && (
+        isAdmin() ||
+        request.auth.uid in existing().assignedNurseIds ||
+        existing().createdBy == request.auth.uid
+      );
+      allow list: if isVerifiedUser() && (
+        isBootstrappedAdmin() ||
+        request.auth.uid in resource.data.assignedNurseIds ||
+        resource.data.createdBy == request.auth.uid
+      );
+      allow create: if isVerifiedUser() &&
+        isValidId(reminderId) &&
+        isValidReminder(incoming(), reminderId) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isWriterRole() &&
+        exists(/databases/$(database)/documents/patients/$(incoming().patientId)) &&
+        incoming().assignedNurseIds == get(/databases/$(database)/documents/patients/$(incoming().patientId)).data.assignedNurseIds &&
+        (
+          isAdmin() ||
+          request.auth.uid in get(/databases/$(database)/documents/patients/$(incoming().patientId)).data.assignedNurseIds
+        );
+      allow update: if isVerifiedUser() &&
+        isValidId(reminderId) &&
+        isValidReminder(incoming(), reminderId) &&
+        incoming().reminderId == existing().reminderId &&
+        incoming().patientId == existing().patientId &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isWriterRole() &&
+        (
+          isAdmin() ||
+          (
+            existing().status != 'completed' &&
+            (request.auth.uid in existing().assignedNurseIds || existing().createdBy == request.auth.uid)
+          )
+        ) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'category', 'dueAtMs', 'repeatMinutes', 'status', 'updatedAt'
+        ]);
+      allow delete: if isVerifiedUser() && isValidId(reminderId) && (
+        isAdmin() ||
+        (existing().createdBy == request.auth.uid && isWriterRole())
+      );
+    }
+
+    // /auditLogs/{logId} - Immutable Compliance & Privacy Audit Trail
+    match /auditLogs/{logId} {
+      allow get: if isVerifiedUser() && isValidId(logId) && (
+        isAdmin() ||
+        existing().actorUid == request.auth.uid
+      );
+      allow list: if isVerifiedUser() && (
+        isBootstrappedAdmin() ||
+        resource.data.actorUid == request.auth.uid
+      );
+      allow create: if isVerifiedUser() &&
+        isValidId(logId) &&
+        isValidAuditLog(incoming(), logId) &&
+        incoming().actorUid == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

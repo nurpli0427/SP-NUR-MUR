@@ -1,0 +1,109 @@
+import React, { useState } from 'react';
+import { LockKeyhole, ShieldCheck, Stethoscope } from 'lucide-react';
+
+interface SignInViewProps {
+  onSignIn: () => Promise<void>;
+  error: string | null;
+}
+
+export const SignInView: React.FC<SignInViewProps> = ({ onSignIn, error }) => {
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    setLoading(true);
+    try {
+      await onSignIn();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col lg:flex-row">
+      <div className="flex-1 flex flex-col justify-between p-8 lg:p-14 max-w-2xl">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-lg bg-teal-700 flex items-center justify-center text-white">
+            <Stethoscope className="w-5 h-5" />
+          </div>
+          <span className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
+            護安錄 CareNote RN
+          </span>
+        </div>
+
+        <div className="py-10 space-y-6">
+          <div className="space-y-3">
+            <p className="text-xs font-medium text-teal-700 dark:text-teal-400">
+              特別護理師專屬臨床照護紀錄平台
+            </p>
+            <h1 className="text-3xl lg:text-4xl font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-tight [text-wrap:balance]">
+              精準編寫 SOAP 與 DART 護理紀錄，守護病患隱私與床邊連續照護
+            </h1>
+            <p className="text-base text-slate-600 dark:text-slate-300 leading-relaxed max-w-xl">
+              整合即時雲端同步、病患分級權限控管、異常生命徵象監控、行動裝置推播提醒、DOC / PDF 正式報表匯出與離線自動備份。
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <div className="pt-3">
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                SOAP / DART 雙格式結構化編寫
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                內建臨床快選片語與生命徵象異常自動偵測，支援一鍵匯出 Word 與 PDF。
+              </p>
+            </div>
+            <div className="pt-3">
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                離線編輯與零遺失自動備份
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                隔離病房斷網仍可持續建檔，連線後自動同步並保留本地版本快照。
+              </p>
+            </div>
+          </div>
+
+          {error && (
+            <div className="p-3.5 text-sm text-red-800 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg">
+              {error}
+            </div>
+          )}
+
+          <div className="pt-2 flex flex-wrap items-center gap-4">
+            <button
+              type="button"
+              onClick={handleClick}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2.5 px-6 py-3 text-sm font-semibold text-white bg-teal-700 hover:bg-teal-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <LockKeyhole className="w-4 h-4" />
+              {loading ? '正在驗證臨床帳號...' : '使用 Google 醫療人員帳號登入'}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <ShieldCheck className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+          <span>僅限經授權指派之特別護理師與督導存取病患資料 · 稽核軌跡全程留存</span>
+        </div>
+      </div>
+
+      <div className="hidden lg:block lg:flex-1 relative bg-slate-900 overflow-hidden">
+        <img
+          src="/src/assets/images/clinical_ward_backdrop_1795098348244.jpg"
+          alt="現代特別護理站與加護病房走廊"
+          referrerPolicy="no-referrer"
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/30 to-transparent" />
+        <div className="absolute bottom-10 left-10 right-10 text-white space-y-2">
+          <p className="text-xs font-medium text-teal-300">
+            臨床實務導向設計
+          </p>
+          <p className="text-xl font-semibold leading-snug max-w-lg">
+            「讓特別護理師把專注力留給病床邊的每一位生命，交班與法規紀錄交給即時且安全的結構化系統。」
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};

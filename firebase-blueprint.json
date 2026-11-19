@@ -1,0 +1,536 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private nurse or clinical supervisor user account with PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "role": {
+          "type": "string",
+          "enum": ["head_nurse", "special_nurse", "supervisor_viewer"]
+        },
+        "department": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "licenseNo": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "signatureText": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "pushEnabled": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "email", "role", "department", "licenseNo", "signatureText", "pushEnabled", "createdAt", "updatedAt"]
+    },
+    "StaffPublicProfile": {
+      "title": "StaffPublicProfile",
+      "description": "Non-PII staff directory entry for nurse shift assignment and co-signature lookup.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "role": {
+          "type": "string",
+          "enum": ["head_nurse", "special_nurse", "supervisor_viewer"]
+        },
+        "department": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "role", "department", "active", "updatedAt"]
+    },
+    "AdminRegistry": {
+      "title": "AdminRegistry",
+      "description": "Head nurse administrator registry.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "grantedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "grantedBy", "createdAt"]
+    },
+    "PatientChart": {
+      "title": "PatientChart",
+      "description": "Patient demographic and clinical assignment chart protected by privacy access control.",
+      "type": "object",
+      "properties": {
+        "patientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "mrn": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 32
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "bedNumber": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "ward": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "age": {
+          "type": "number"
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["M", "F", "Other"]
+        },
+        "diagnosis": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "careLevel": {
+          "type": "string",
+          "enum": ["ICU", "Special", "PostOp", "Hospice"]
+        },
+        "allergies": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "assignedNurseIds": {
+          "type": "array"
+        },
+        "primaryNurseId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "discharged"]
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "patientId",
+        "mrn",
+        "fullName",
+        "bedNumber",
+        "ward",
+        "age",
+        "gender",
+        "diagnosis",
+        "careLevel",
+        "allergies",
+        "assignedNurseIds",
+        "primaryNurseId",
+        "status",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CareRecord": {
+      "title": "CareRecord",
+      "description": "Structured SOAP or DART special nursing care record with vital sign telemetry.",
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "mrn": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 32
+        },
+        "bedNumber": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "format": {
+          "type": "string",
+          "enum": ["SOAP", "DART"]
+        },
+        "shift": {
+          "type": "string",
+          "enum": ["Day", "Evening", "Night"]
+        },
+        "focusTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "pending_review", "signed", "alert"]
+        },
+        "assignedNurseIds": {
+          "type": "array"
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "signedBy": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "signedByName": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "signatureText": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "signedAtMs": {
+          "type": "number"
+        },
+        "amendmentReason": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "amendedBy": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "amendedByName": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "amendedAtMs": {
+          "type": "number"
+        },
+        "vitals": {
+          "type": "object"
+        },
+        "soap": {
+          "type": "object"
+        },
+        "dart": {
+          "type": "object"
+        },
+        "hasAlert": {
+          "type": "boolean"
+        },
+        "alertReason": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "offlineOriginId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "recordedAtMs": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "recordId",
+        "patientId",
+        "patientName",
+        "mrn",
+        "bedNumber",
+        "format",
+        "shift",
+        "focusTitle",
+        "status",
+        "assignedNurseIds",
+        "authorId",
+        "authorName",
+        "signedBy",
+        "signedByName",
+        "signatureText",
+        "signedAtMs",
+        "amendmentReason",
+        "amendedBy",
+        "amendedByName",
+        "amendedAtMs",
+        "vitals",
+        "soap",
+        "dart",
+        "hasAlert",
+        "alertReason",
+        "offlineOriginId",
+        "recordedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CareReminder": {
+      "title": "CareReminder",
+      "description": "Mobile push reminder and shift care schedule item.",
+      "type": "object",
+      "properties": {
+        "reminderId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "bedNumber": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "category": {
+          "type": "string",
+          "enum": ["vitals", "turning", "medication", "handover", "assessment"]
+        },
+        "dueAtMs": {
+          "type": "number"
+        },
+        "repeatMinutes": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "notified", "completed", "snoozed"]
+        },
+        "assignedNurseIds": {
+          "type": "array"
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "reminderId",
+        "patientId",
+        "patientName",
+        "bedNumber",
+        "title",
+        "category",
+        "dueAtMs",
+        "repeatMinutes",
+        "status",
+        "assignedNurseIds",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable compliance audit trail for patient privacy, exports, and sign-offs.",
+      "type": "object",
+      "properties": {
+        "logId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "record_created",
+            "record_updated",
+            "record_signed",
+            "record_amended",
+            "record_unlocked",
+            "record_exported_pdf",
+            "record_exported_doc",
+            "patient_created",
+            "role_updated",
+            "backup_restored"
+          ]
+        },
+        "targetType": {
+          "type": "string",
+          "enum": ["careRecord", "patient", "user", "backup"]
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["logId", "actorUid", "actorName", "action", "targetType", "targetId", "summary", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profiles with email PII."
+    },
+    "/staffPublic/{userId}": {
+      "schema": { "$ref": "#/entities/StaffPublicProfile" },
+      "description": "Non-PII staff directory for clinical assignment."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRegistry" },
+      "description": "Head nurse administrator registry."
+    },
+    "/patients/{patientId}": {
+      "schema": { "$ref": "#/entities/PatientChart" },
+      "description": "Patient demographic charts scoped to assigned nurses."
+    },
+    "/careRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/CareRecord" },
+      "description": "SOAP and DART special nursing records."
+    },
+    "/reminders/{reminderId}": {
+      "schema": { "$ref": "#/entities/CareReminder" },
+      "description": "Mobile push and shift care reminders."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable privacy and clinical compliance audit log."
+    }
+  }
+}
