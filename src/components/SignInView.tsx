@@ -136,17 +136,18 @@ export const SignInView: React.FC<SignInViewProps> = ({
               </a>
             )}
 
-            {popupBlocked && !redirectCookieBlocked && !isEmbeddedIframe && (
-              <button
-                type="button"
-                onClick={() => void handleRedirectClick()}
-                disabled={loading || redirecting}
-                className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-teal-800 dark:text-teal-200 bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800 hover:bg-teal-100 dark:hover:bg-teal-900/50 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <ExternalLink className="w-4 h-4" />
-                {redirecting ? '正在導向 Google 驗證頁...' : '改用整頁跳轉登入 (Redirect)'}
-              </button>
-            )}
+            {((popupBlocked && !redirectCookieBlocked) || (!isCrossOriginAuth && redirectCookieBlocked)) &&
+              !isEmbeddedIframe && (
+                <button
+                  type="button"
+                  onClick={() => void handleRedirectClick()}
+                  disabled={loading || redirecting}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-teal-800 dark:text-teal-200 bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800 hover:bg-teal-100 dark:hover:bg-teal-900/50 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  {redirecting ? '正在導向 Google 驗證頁...' : '改用整頁跳轉登入 (Redirect)'}
+                </button>
+              )}
           </div>
         </div>
 
