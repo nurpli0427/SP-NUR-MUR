@@ -17,9 +17,11 @@ import {
   type AuditAction,
   type AuditLog,
   type CareRecord,
+  type CareRecordRevision,
   type CareReminder,
   FIELD_LIMITS,
   type PatientChart,
+  type RevisionChangeType,
   type StaffPublicProfile,
   type UserProfile,
   type UserRole,
@@ -322,6 +324,33 @@ export function subscribeCareRecords(
   );
 }
 
+export function subscribeRecordRevisions(
+  recordId: string,
+  uid: string,
+  isBootstrappedAdmin: boolean,
+  onData: (revisions: CareRecordRevision[]) => void
+): Unsubscribe {
+  const colRef = collection(db, 'careRecords', recordId, 'revisions');
+  const q = isBootstrappedAdmin
+    ? query(colRef)
+    : query(colRef, where('assignedNurseIds', 'array-contains', uid));
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const items = snap.docs.map((d) => d.data() as CareRecordRevision);
+      items.sort((a, b) => {
+        if (b.savedAtMs !== a.savedAtMs) return b.savedAtMs - a.savedAtMs;
+        return b.versionNumber - a.versionNumber;
+      });
+      onData(items);
+    },
+    (err) => {
+      handleFirestoreError(err, OperationType.LIST, `careRecords/${recordId}/revisions`);
+    }
+  );
+}
+
 export function subscribeReminders(
   uid: string,
   isBootstrappedAdmin: boolean,
@@ -429,6 +458,57 @@ export async function updatePatientAssignments(
   }
 }
 
+async function writeCareRecordRevision(params: {
+  actor: UserProfile;
+  recordId: string;
+  patientId: string;
+  assignedNurseIds: string[];
+  versionNumber: number;
+  changeType: RevisionChangeType;
+  changeReason: string;
+  format: CareRecord['format'];
+  shift: CareRecord['shift'];
+  focusTitle: string;
+  status: CareRecord['status'];
+  signatureText: string;
+  vitals: CareRecord['vitals'];
+  soap: CareRecord['soap'];
+  dart: CareRecord['dart'];
+  hasAlert: boolean;
+  alertReason: string;
+}): Promise<void> {
+  const revisionId = generateSafeId('rev');
+  const payload = {
+    revisionId,
+    recordId: params.recordId,
+    patientId: params.patientId,
+    assignedNurseIds: params.assignedNurseIds.slice(0, FIELD_LIMITS.MAX_ASSIGNED_NURSES),
+    versionNumber: Math.max(1, Math.round(params.versionNumber)),
+    changeType: params.changeType,
+    changeReason: clampString(params.changeReason, 240),
+    format: params.format,
+    shift: params.shift,
+    focusTitle: clampString(params.focusTitle, FIELD_LIMITS.FOCUS_MAX),
+    status: params.status,
+    signatureText: clampString(params.signatureText, 120),
+    vitals: params.vitals,
+    soap: params.soap,
+    dart: params.dart,
+    hasAlert: params.hasAlert,
+    alertReason: clampString(params.alertReason, FIELD_LIMITS.ALERT_REASON_MAX),
+    editedByUid: params.actor.uid,
+    editedByName: clampString(params.actor.displayName, FIELD_LIMITS.NAME_MAX),
+    savedAtMs: Date.now(),
+    createdAt: serverTimestamp(),
+  };
+
+  try {
+    await setDoc(doc(db, 'careRecords', params.recordId, 'revisions', revisionId), payload);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `careRecords/${params.recordId}/revisions/${revisionId}`);
+  }
+}
+
 export async function saveCareRecord(
   actor: UserProfile,
   patient: PatientChart,
@@ -446,6 +526,8 @@ export async function saveCareRecord(
     signatureText?: string;
     isSignedAmendment?: boolean;
     amendmentReason?: string;
+    previousAmendedAtMs?: number;
+    nextVersionNumber?: number;
   }
 ): Promise<string> {
   const isNew = !draft.recordId;
@@ -497,6 +579,9 @@ export async function saveCareRecord(
   const focusTitle = clampString(draft.focusTitle || '特別護理評估紀錄', FIELD_LIMITS.FOCUS_MAX);
   const alertReason = clampString(reasons.join('、'), FIELD_LIMITS.ALERT_REASON_MAX);
 
+  const nextVer = Math.max(1, draft.nextVersionNumber ?? (isNew ? 1 : 2));
+  const assignedList = patient.assignedNurseIds.slice(0, FIELD_LIMITS.MAX_ASSIGNED_NURSES);
+
   if (isNew) {
     const payload = {
       recordId,
@@ -508,7 +593,7 @@ export async function saveCareRecord(
       shift: draft.shift,
       focusTitle,
       status: computedStatus,
-      assignedNurseIds: patient.assignedNurseIds.slice(0, FIELD_LIMITS.MAX_ASSIGNED_NURSES),
+      assignedNurseIds: assignedList,
       authorId: actor.uid,
       authorName: clampString(actor.displayName, FIELD_LIMITS.NAME_MAX),
       signedBy,
@@ -531,6 +616,25 @@ export async function saveCareRecord(
     };
     try {
       await setDoc(doc(db, 'careRecords', recordId), payload);
+      await writeCareRecordRevision({
+        actor,
+        recordId,
+        patientId: patient.patientId,
+        assignedNurseIds: assignedList,
+        versionNumber: 1,
+        changeType: computedStatus === 'signed' ? 'signed' : 'created',
+        changeReason: computedStatus === 'signed' ? '建立並電子簽署定稿' : '建立初版護理紀錄',
+        format: draft.format,
+        shift: draft.shift,
+        focusTitle,
+        status: computedStatus,
+        signatureText,
+        vitals,
+        soap,
+        dart,
+        hasAlert,
+        alertReason,
+      });
       await writeAuditLog(
         actor,
         computedStatus === 'signed' ? 'record_signed' : 'record_created',
@@ -542,7 +646,7 @@ export async function saveCareRecord(
       handleFirestoreError(err, OperationType.CREATE, `careRecords/${recordId}`);
     }
   } else if (isAmendment) {
-    const amendedAtMs = Date.now();
+    const amendedAtMs = Math.max(Date.now(), (draft.previousAmendedAtMs || 0) + 1);
     try {
       await updateDoc(doc(db, 'careRecords', recordId), {
         format: draft.format,
@@ -564,6 +668,25 @@ export async function saveCareRecord(
         alertReason,
         recordedAtMs: draft.recordedAtMs || Date.now(),
         updatedAt: serverTimestamp(),
+      });
+      await writeCareRecordRevision({
+        actor,
+        recordId,
+        patientId: patient.patientId,
+        assignedNurseIds: assignedList,
+        versionNumber: nextVer,
+        changeType: 'amended',
+        changeReason: cleanAmendmentReason,
+        format: draft.format,
+        shift: draft.shift,
+        focusTitle,
+        status: 'signed',
+        signatureText,
+        vitals,
+        soap,
+        dart,
+        hasAlert,
+        alertReason,
       });
       await writeAuditLog(
         actor,
@@ -594,6 +717,30 @@ export async function saveCareRecord(
         recordedAtMs: draft.recordedAtMs || Date.now(),
         updatedAt: serverTimestamp(),
       });
+      await writeCareRecordRevision({
+        actor,
+        recordId,
+        patientId: patient.patientId,
+        assignedNurseIds: assignedList,
+        versionNumber: nextVer,
+        changeType: computedStatus === 'signed' ? 'signed' : 'updated',
+        changeReason:
+          computedStatus === 'signed'
+            ? '完成覆核並電子簽署定稿'
+            : computedStatus === 'pending_review'
+            ? '儲存內容並送交覆核'
+            : '更新草稿護理內容',
+        format: draft.format,
+        shift: draft.shift,
+        focusTitle,
+        status: computedStatus,
+        signatureText,
+        vitals,
+        soap,
+        dart,
+        hasAlert,
+        alertReason,
+      });
       await writeAuditLog(
         actor,
         computedStatus === 'signed' ? 'record_signed' : 'record_updated',
@@ -609,7 +756,142 @@ export async function saveCareRecord(
   return recordId;
 }
 
-export async function unlockSignedRecord(actor: UserProfile, record: CareRecord): Promise<void> {
+export async function restoreCareRecordRevision(params: {
+  actor: UserProfile;
+  currentRecord: CareRecord;
+  revision: CareRecordRevision;
+  nextVersionNumber: number;
+  restoreReason?: string;
+}): Promise<void> {
+  const { actor, currentRecord, revision, nextVersionNumber, restoreReason } = params;
+  const recordId = currentRecord.recordId;
+  const vitals = sanitizeVitals(revision.vitals);
+  const { hasAlert, reasons } = evaluateVitalAlerts(vitals);
+  const alertReason = clampString(reasons.join('、'), FIELD_LIMITS.ALERT_REASON_MAX);
+  const cleanReason = clampString(
+    restoreReason?.trim() || `還原至 v${revision.versionNumber} 歷史版本`,
+    240
+  );
+
+  if (currentRecord.status === 'signed') {
+    if (cleanReason.length < 2) {
+      throw new Error('還原已簽署紀錄時，必須提供至少 2 字的修訂原因。');
+    }
+    const sigText = clampString(
+      revision.signatureText || actor.signatureText || `特別護理師 ${actor.displayName} RN`,
+      120
+    );
+    const nowMs = Math.max(Date.now(), (currentRecord.amendedAtMs || 0) + 1);
+    try {
+      await updateDoc(doc(db, 'careRecords', recordId), {
+        format: revision.format,
+        shift: revision.shift,
+        focusTitle: clampString(revision.focusTitle, FIELD_LIMITS.FOCUS_MAX),
+        status: 'signed',
+        signedBy: actor.uid,
+        signedByName: clampString(actor.displayName, FIELD_LIMITS.NAME_MAX),
+        signatureText: sigText,
+        signedAtMs: nowMs,
+        amendmentReason: cleanReason,
+        amendedBy: actor.uid,
+        amendedByName: clampString(actor.displayName, FIELD_LIMITS.NAME_MAX),
+        amendedAtMs: nowMs,
+        vitals,
+        soap: revision.soap,
+        dart: revision.dart,
+        hasAlert,
+        alertReason,
+        updatedAt: serverTimestamp(),
+      });
+      await writeCareRecordRevision({
+        actor,
+        recordId,
+        patientId: currentRecord.patientId,
+        assignedNurseIds: currentRecord.assignedNurseIds,
+        versionNumber: nextVersionNumber,
+        changeType: 'restored',
+        changeReason: cleanReason,
+        format: revision.format,
+        shift: revision.shift,
+        focusTitle: revision.focusTitle,
+        status: 'signed',
+        signatureText: sigText,
+        vitals,
+        soap: revision.soap,
+        dart: revision.dart,
+        hasAlert,
+        alertReason,
+      });
+      await writeAuditLog(
+        actor,
+        'record_restored',
+        'careRecord',
+        recordId,
+        `還原已簽署紀錄至 v${revision.versionNumber}（${revision.focusTitle}）· 原因：${cleanReason}`
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `careRecords/${recordId}`);
+    }
+  } else {
+    const nextStatus = hasAlert
+      ? 'alert'
+      : currentRecord.status === 'alert'
+      ? 'pending_review'
+      : currentRecord.status;
+    try {
+      await updateDoc(doc(db, 'careRecords', recordId), {
+        format: revision.format,
+        shift: revision.shift,
+        focusTitle: clampString(revision.focusTitle, FIELD_LIMITS.FOCUS_MAX),
+        status: nextStatus,
+        signedBy: '',
+        signedByName: '',
+        signatureText: '',
+        signedAtMs: 0,
+        vitals,
+        soap: revision.soap,
+        dart: revision.dart,
+        hasAlert,
+        alertReason,
+        updatedAt: serverTimestamp(),
+      });
+      await writeCareRecordRevision({
+        actor,
+        recordId,
+        patientId: currentRecord.patientId,
+        assignedNurseIds: currentRecord.assignedNurseIds,
+        versionNumber: nextVersionNumber,
+        changeType: 'restored',
+        changeReason: cleanReason,
+        format: revision.format,
+        shift: revision.shift,
+        focusTitle: revision.focusTitle,
+        status: nextStatus,
+        signatureText: '',
+        vitals,
+        soap: revision.soap,
+        dart: revision.dart,
+        hasAlert,
+        alertReason,
+      });
+      await writeAuditLog(
+        actor,
+        'record_restored',
+        'careRecord',
+        recordId,
+        `還原紀錄至 v${revision.versionNumber}（${revision.focusTitle}）`
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `careRecords/${recordId}`);
+    }
+  }
+}
+
+export async function unlockSignedRecord(
+  actor: UserProfile,
+  record: CareRecord,
+  nextVersionNumber = 2
+): Promise<void> {
   try {
     await updateDoc(doc(db, 'careRecords', record.recordId), {
       status: 'pending_review',
@@ -618,6 +900,25 @@ export async function unlockSignedRecord(actor: UserProfile, record: CareRecord)
       signatureText: '',
       signedAtMs: 0,
       updatedAt: serverTimestamp(),
+    });
+    await writeCareRecordRevision({
+      actor,
+      recordId: record.recordId,
+      patientId: record.patientId,
+      assignedNurseIds: record.assignedNurseIds,
+      versionNumber: nextVersionNumber,
+      changeType: 'unlocked',
+      changeReason: '護理長解鎖已簽署紀錄以供增補修訂',
+      format: record.format,
+      shift: record.shift,
+      focusTitle: record.focusTitle,
+      status: 'pending_review',
+      signatureText: '',
+      vitals: record.vitals,
+      soap: record.soap,
+      dart: record.dart,
+      hasAlert: record.hasAlert,
+      alertReason: record.alertReason,
     });
     await writeAuditLog(
       actor,

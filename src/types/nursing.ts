@@ -18,12 +18,21 @@ export type AuditAction =
   | 'record_updated'
   | 'record_signed'
   | 'record_amended'
+  | 'record_restored'
   | 'record_unlocked'
   | 'record_exported_pdf'
   | 'record_exported_doc'
   | 'patient_created'
   | 'role_updated'
   | 'backup_restored';
+
+export type RevisionChangeType =
+  | 'created'
+  | 'updated'
+  | 'signed'
+  | 'amended'
+  | 'unlocked'
+  | 'restored';
 
 export interface UserProfile {
   uid: string;
@@ -123,6 +132,30 @@ export interface CareRecord {
   // Local runtime sync metadata from Firestore snapshot
   _hasPendingWrites?: boolean;
   _fromCache?: boolean;
+}
+
+export interface CareRecordRevision {
+  revisionId: string;
+  recordId: string;
+  patientId: string;
+  assignedNurseIds: string[];
+  versionNumber: number;
+  changeType: RevisionChangeType;
+  changeReason: string;
+  format: CareRecordFormat;
+  shift: ShiftType;
+  focusTitle: string;
+  status: CareRecordStatus;
+  signatureText: string;
+  vitals: VitalSigns;
+  soap: SoapContent;
+  dart: DartContent;
+  hasAlert: boolean;
+  alertReason: string;
+  editedByUid: string;
+  editedByName: string;
+  savedAtMs: number;
+  createdAt?: Timestamp;
 }
 
 export interface CareReminder {

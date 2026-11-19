@@ -244,6 +244,44 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidCareRecordRevision(data, recordId, revisionId) {
+      return data.keys().hasAll([
+          'revisionId', 'recordId', 'patientId', 'assignedNurseIds', 'versionNumber',
+          'changeType', 'changeReason', 'format', 'shift', 'focusTitle', 'status',
+          'signatureText', 'vitals', 'soap', 'dart', 'hasAlert', 'alertReason',
+          'editedByUid', 'editedByName', 'savedAtMs', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'revisionId', 'recordId', 'patientId', 'assignedNurseIds', 'versionNumber',
+          'changeType', 'changeReason', 'format', 'shift', 'focusTitle', 'status',
+          'signatureText', 'vitals', 'soap', 'dart', 'hasAlert', 'alertReason',
+          'editedByUid', 'editedByName', 'savedAtMs', 'createdAt'
+        ]) &&
+        isValidId(data.revisionId) &&
+        data.revisionId == revisionId &&
+        isValidId(data.recordId) &&
+        data.recordId == recordId &&
+        isValidId(data.patientId) &&
+        isValidBoundedUidList(data.assignedNurseIds) &&
+        data.versionNumber is number && data.versionNumber >= 1 &&
+        data.changeType in ['created', 'updated', 'signed', 'amended', 'unlocked', 'restored'] &&
+        data.changeReason is string && data.changeReason.size() <= 240 &&
+        data.format in ['SOAP', 'DART'] &&
+        data.shift in ['Day', 'Evening', 'Night'] &&
+        data.focusTitle is string && data.focusTitle.size() >= 1 && data.focusTitle.size() <= 120 &&
+        data.status in ['draft', 'pending_review', 'signed', 'alert'] &&
+        data.signatureText is string && data.signatureText.size() <= 120 &&
+        isValidVitals(data.vitals) &&
+        isValidSoap(data.soap) &&
+        isValidDart(data.dart) &&
+        data.hasAlert is bool &&
+        data.alertReason is string && data.alertReason.size() <= 240 &&
+        isValidId(data.editedByUid) &&
+        data.editedByName is string && data.editedByName.size() >= 1 && data.editedByName.size() <= 80 &&
+        data.savedAtMs is number && data.savedAtMs > 0 &&
+        data.createdAt is timestamp;
+    }
+
     function isValidAuditLog(data, logId) {
       return data.keys().hasAll(['logId', 'actorUid', 'actorName', 'action', 'targetType', 'targetId', 'summary', 'createdAt']) &&
         data.keys().hasOnly(['logId', 'actorUid', 'actorName', 'action', 'targetType', 'targetId', 'summary', 'createdAt']) &&
@@ -252,8 +290,9 @@ service cloud.firestore {
         isValidId(data.actorUid) &&
         data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 80 &&
         data.action in [
-          'record_created', 'record_updated', 'record_signed', 'record_amended', 'record_unlocked',
-          'record_exported_pdf', 'record_exported_doc', 'patient_created', 'role_updated', 'backup_restored'
+          'record_created', 'record_updated', 'record_signed', 'record_amended', 'record_restored',
+          'record_unlocked', 'record_exported_pdf', 'record_exported_doc', 'patient_created',
+          'role_updated', 'backup_restored'
         ] &&
         data.targetType in ['careRecord', 'patient', 'user', 'backup'] &&
         data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
@@ -457,6 +496,37 @@ service cloud.firestore {
         isAdmin() ||
         (existing().authorId == request.auth.uid && existing().status == 'draft' && isWriterRole())
       );
+
+      // /careRecords/{recordId}/revisions/{revisionId} - Immutable Version History Snapshots
+      match /revisions/{revisionId} {
+        allow get: if isVerifiedUser() && isValidId(recordId) && isValidId(revisionId) && (
+          isAdmin() ||
+          request.auth.uid in existing().assignedNurseIds ||
+          existing().editedByUid == request.auth.uid
+        );
+        allow list: if isVerifiedUser() && (
+          isBootstrappedAdmin() ||
+          request.auth.uid in resource.data.assignedNurseIds ||
+          resource.data.editedByUid == request.auth.uid
+        );
+        allow create: if isVerifiedUser() &&
+          isValidId(recordId) &&
+          isValidId(revisionId) &&
+          isValidCareRecordRevision(incoming(), recordId, revisionId) &&
+          incoming().editedByUid == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          isWriterRole() &&
+          exists(/databases/$(database)/documents/careRecords/$(recordId)) &&
+          incoming().assignedNurseIds == get(/databases/$(database)/documents/careRecords/$(recordId)).data.assignedNurseIds &&
+          incoming().patientId == get(/databases/$(database)/documents/careRecords/$(recordId)).data.patientId &&
+          (
+            isAdmin() ||
+            request.auth.uid in get(/databases/$(database)/documents/careRecords/$(recordId)).data.assignedNurseIds ||
+            get(/databases/$(database)/documents/careRecords/$(recordId)).data.authorId == request.auth.uid
+          );
+        allow update: if false;
+        allow delete: if false;
+      }
     }
 
     // /reminders/{reminderId} - Scheduled Push Reminders

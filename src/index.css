@@ -27,7 +27,44 @@
     background: #ffffff !important;
     color: #0f172a !important;
   }
+
   .no-print {
     display: none !important;
+  }
+
+  body.printing-clinical-sheet .app-shell-root {
+    display: none !important;
+  }
+
+  body.printing-clinical-sheet .print-modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  body.printing-clinical-sheet .print-modal-dialog {
+    max-width: 100% !important;
+    max-height: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  body.printing-clinical-sheet .print-modal-scroll {
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  body.printing-clinical-sheet .printable-clinical-sheet {
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 12px !important;
   }
 }

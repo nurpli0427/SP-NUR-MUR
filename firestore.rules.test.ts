@@ -108,5 +108,14 @@ export const DIRTY_DOZEN_CASES = [
     operation: 'delete',
     auth: { uid: 'attacker', email: 'nurpli0427@gmail.com', email_verified: false },
     expected: 'PERMISSION_DENIED'
+  },
+  {
+    id: 13,
+    name: 'Care Record Revision History Tampering',
+    path: 'careRecords/rec_1/revisions/rev_1',
+    operation: 'update',
+    auth: { uid: 'nurse_a', email: 'nursea@hospital.org', email_verified: true },
+    payload: { changeReason: 'Altered historical reason' },
+    expected: 'PERMISSION_DENIED'
   }
 ] as const;

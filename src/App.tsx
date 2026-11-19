@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
+import {
+  getRedirectResult,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+  type User,
+} from 'firebase/auth';
 import {
   Activity,
   Bell,
@@ -73,6 +80,7 @@ export default function App() {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
   const [activeSection, setActiveSection] = useState<NavSection>('monitor');
@@ -102,6 +110,20 @@ export default function App() {
     }
   }, [darkMode]);
 
+  // Complete any pending signInWithRedirect result
+  useEffect(() => {
+    void getRedirectResult(auth).catch((err) => {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/unauthorized-domain') {
+        setAuthError(
+          `目前網域（${window.location.hostname}）尚未加入 Firebase 授權網域。請至 Firebase Console (sp-nur-mur) → Authentication → Settings → Authorized domains 新增此網域。`
+        );
+      } else {
+        setAuthError(err instanceof Error ? err.message : 'Google 跳轉登入失敗，請再試一次。');
+      }
+    });
+  }, []);
+
   // Listen to Firebase Auth state
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -111,6 +133,7 @@ export default function App() {
           const userProfile = await ensureUserProfile(user);
           setProfile(userProfile);
           setAuthError(null);
+          setPopupBlocked(false);
         } catch (err) {
           setAuthError(err instanceof Error ? err.message : '載入使用者權限失敗');
         }
@@ -127,13 +150,15 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  const isBootstrappedAdmin = Boolean(
+    firebaseUser?.email?.toLowerCase() === 'nurpli0427@gmail.com' &&
+      firebaseUser?.emailVerified
+  );
+
   // Subscribe to Firestore real-time collections ONLY after auth & profile are ready
   useEffect(() => {
     if (!firebaseUser || !profile) return;
 
-    const isBootstrappedAdmin =
-      firebaseUser.email?.toLowerCase() === 'nurpli0427@gmail.com' &&
-      firebaseUser.emailVerified;
     const isAdminUser = profile.role === 'head_nurse' || isBootstrappedAdmin;
 
     const unsubs = [
@@ -150,7 +175,7 @@ export default function App() {
     return () => {
       for (const u of unsubs) u();
     };
-  }, [firebaseUser, profile]);
+  }, [firebaseUser, profile, isBootstrappedAdmin]);
 
   const triggerBackup = useCallback(
     async (triggerType: 'auto' | 'manual' | 'pre_sign') => {
@@ -199,10 +224,47 @@ export default function App() {
 
   const handleSignIn = async () => {
     setAuthError(null);
+    setPopupBlocked(false);
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'Google 帳號登入取消或失敗');
+      const code = (err as { code?: string })?.code || '';
+      if (
+        code === 'auth/popup-blocked' ||
+        code === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        setPopupBlocked(true);
+        const inIframe = window.self !== window.top;
+        setAuthError(
+          inIframe
+            ? '瀏覽器封鎖了 Google 登入彈出視窗（auth/popup-blocked）。請於瀏覽器網址列右側設為「永遠允許彈出式視窗」後重試，或於獨立分頁開啟後使用「整頁跳轉登入」。'
+            : '瀏覽器封鎖了 Google 登入彈出視窗（auth/popup-blocked）。請允許此網站彈出視窗，或點擊下方「改用整頁跳轉登入 (Redirect)」。'
+        );
+      } else if (code === 'auth/unauthorized-domain') {
+        setAuthError(
+          `目前網域（${window.location.hostname}）尚未加入 Firebase 授權網域。請至 Firebase Console (sp-nur-mur) → Authentication → Settings → Authorized domains 新增此網域。`
+        );
+      } else if (
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/cancelled-popup-request'
+      ) {
+        setAuthError('Google 登入視窗已關閉或取消，請再試一次。');
+      } else {
+        setAuthError(err instanceof Error ? err.message : 'Google 帳號登入取消或失敗');
+      }
+    }
+  };
+
+  const handleSignInRedirect = async () => {
+    setAuthError(null);
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (err) {
+      setAuthError(
+        err instanceof Error
+          ? err.message
+          : '跳轉登入失敗，請改為允許彈出式視窗後再試。'
+      );
     }
   };
 
@@ -235,7 +297,12 @@ export default function App() {
   if (!firebaseUser || !profile) {
     return (
       <ErrorBoundary>
-        <SignInView onSignIn={handleSignIn} error={authError} />
+        <SignInView
+          onSignIn={handleSignIn}
+          onSignInRedirect={handleSignInRedirect}
+          error={authError}
+          popupBlocked={popupBlocked}
+        />
       </ErrorBoundary>
     );
   }
@@ -245,7 +312,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
+      <div className="app-shell-root min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
         {/* Desktop Sidebar */}
         <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-30">
           <div className="h-16 px-5 flex items-center gap-2.5 border-b border-slate-200 dark:border-slate-800">
@@ -492,6 +559,7 @@ export default function App() {
             {activeSection === 'records' && (
               <RecordWorkspaceView
                 profile={profile}
+                isBootstrappedAdmin={isBootstrappedAdmin}
                 patients={patients}
                 records={records}
                 selectedRecord={selectedRecord}

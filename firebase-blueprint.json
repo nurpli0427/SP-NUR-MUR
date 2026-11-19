@@ -473,6 +473,7 @@
             "record_updated",
             "record_signed",
             "record_amended",
+            "record_restored",
             "record_unlocked",
             "record_exported_pdf",
             "record_exported_doc",
@@ -501,6 +502,123 @@
         }
       },
       "required": ["logId", "actorUid", "actorName", "action", "targetType", "targetId", "summary", "createdAt"]
+    },
+    "CareRecordRevision": {
+      "title": "CareRecordRevision",
+      "description": "Immutable version history snapshot of a care record capturing timestamp, author, and change/amendment reason.",
+      "type": "object",
+      "properties": {
+        "revisionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "recordId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "assignedNurseIds": {
+          "type": "array"
+        },
+        "versionNumber": {
+          "type": "number"
+        },
+        "changeType": {
+          "type": "string",
+          "enum": ["created", "updated", "signed", "amended", "unlocked", "restored"]
+        },
+        "changeReason": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "format": {
+          "type": "string",
+          "enum": ["SOAP", "DART"]
+        },
+        "shift": {
+          "type": "string",
+          "enum": ["Day", "Evening", "Night"]
+        },
+        "focusTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "pending_review", "signed", "alert"]
+        },
+        "signatureText": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "vitals": {
+          "type": "object"
+        },
+        "soap": {
+          "type": "object"
+        },
+        "dart": {
+          "type": "object"
+        },
+        "hasAlert": {
+          "type": "boolean"
+        },
+        "alertReason": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "editedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "editedByName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "savedAtMs": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "revisionId",
+        "recordId",
+        "patientId",
+        "assignedNurseIds",
+        "versionNumber",
+        "changeType",
+        "changeReason",
+        "format",
+        "shift",
+        "focusTitle",
+        "status",
+        "signatureText",
+        "vitals",
+        "soap",
+        "dart",
+        "hasAlert",
+        "alertReason",
+        "editedByUid",
+        "editedByName",
+        "savedAtMs",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -523,6 +641,10 @@
     "/careRecords/{recordId}": {
       "schema": { "$ref": "#/entities/CareRecord" },
       "description": "SOAP and DART special nursing records."
+    },
+    "/careRecords/{recordId}/revisions/{revisionId}": {
+      "schema": { "$ref": "#/entities/CareRecordRevision" },
+      "description": "Immutable revision history snapshots for each care record."
     },
     "/reminders/{reminderId}": {
       "schema": { "$ref": "#/entities/CareReminder" },

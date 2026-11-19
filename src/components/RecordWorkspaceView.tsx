@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  Eye,
   FileDown,
   FilePenLine,
   FileText,
+  History,
   Lock,
   Plus,
   Search,
@@ -31,13 +33,16 @@ import {
 import { deleteLocalDraft, saveLocalDraft } from '../lib/offlineBackup';
 import {
   deleteDraftRecord,
+  restoreCareRecordRevision,
   saveCareRecord,
+  subscribeRecordRevisions,
   unlockSignedRecord,
   writeAuditLog,
 } from '../lib/nursingService';
 import {
   type CareRecord,
   type CareRecordFormat,
+  type CareRecordRevision,
   type CareRecordStatus,
   type DartContent,
   FIELD_LIMITS,
@@ -48,9 +53,12 @@ import {
   type UserProfile,
   type VitalSigns,
 } from '../types/nursing';
+import { PrintPreviewModal } from './PrintPreviewModal';
+import { RecordHistorySidebar } from './RecordHistorySidebar';
 
 interface RecordWorkspaceViewProps {
   profile: UserProfile;
+  isBootstrappedAdmin: boolean;
   patients: PatientChart[];
   records: CareRecord[];
   selectedRecord: CareRecord | null;
@@ -89,6 +97,7 @@ const EMPTY_DART: DartContent = {
 
 export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
   profile,
+  isBootstrappedAdmin,
   patients,
   records,
   selectedRecord,
@@ -125,6 +134,12 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
   const [showAmendPrompt, setShowAmendPrompt] = useState(false);
   const [isAmendingSigned, setIsAmendingSigned] = useState(false);
   const [amendmentReason, setAmendmentReason] = useState('');
+
+  // Print preview modal & Version History sidebar state
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [showHistorySidebar, setShowHistorySidebar] = useState(true);
+  const [revisions, setRevisions] = useState<CareRecordRevision[]>([]);
+  const [restoringRevisionId, setRestoringRevisionId] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState<'pdf' | 'doc' | 'docx' | null>(null);
@@ -166,6 +181,21 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
       setFeedback(null);
     }
   }, [selectedRecord, profile.signatureText, profile.displayName]);
+
+  // Subscribe to version history snapshots for the selected record
+  useEffect(() => {
+    if (!selectedRecord?.recordId) {
+      setRevisions([]);
+      return;
+    }
+    const unsub = subscribeRecordRevisions(
+      selectedRecord.recordId,
+      profile.uid,
+      isBootstrappedAdmin,
+      setRevisions
+    );
+    return () => unsub();
+  }, [selectedRecord?.recordId, profile.uid, isBootstrappedAdmin]);
 
   // Apply restored local draft if triggered from Backup Center
   useEffect(() => {
@@ -311,6 +341,13 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
       if (targetStatus === 'signed' || isAmendingSigned) {
         await onTriggerAutoBackup('pre_sign');
       }
+      const nextVersionNumber =
+        revisions.length > 0
+          ? Math.max(...revisions.map((r) => r.versionNumber)) + 1
+          : editingRecordId
+          ? 2
+          : 1;
+
       const savedId = await saveCareRecord(profile, targetPatient, {
         recordId: editingRecordId,
         format,
@@ -324,6 +361,8 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
         signatureText: customSignature.trim(),
         isSignedAmendment: isAmendingSigned,
         amendmentReason: amendmentReason.trim(),
+        previousAmendedAtMs: selectedRecord?.amendedAtMs,
+        nextVersionNumber,
       });
       await deleteLocalDraft(editingRecordId || `new_${patientId}`);
       setEditingRecordId(savedId);
@@ -352,7 +391,9 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
     if (!selectedRecord || !isHeadNurse) return;
     setSaving(true);
     try {
-      await unlockSignedRecord(profile, selectedRecord);
+      const nextVersionNumber =
+        revisions.length > 0 ? Math.max(...revisions.map((r) => r.versionNumber)) + 1 : 2;
+      await unlockSignedRecord(profile, selectedRecord, nextVersionNumber);
       setFeedback({ type: 'success', text: '已解鎖此筆紀錄，可進行增補修訂。' });
     } catch (err) {
       setFeedback({
@@ -361,6 +402,50 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRestoreRevision = async (
+    revision: CareRecordRevision,
+    restoreReason?: string
+  ) => {
+    if (!selectedRecord) return;
+    setRestoringRevisionId(revision.revisionId);
+    setFeedback(null);
+    try {
+      await onTriggerAutoBackup('pre_sign');
+      const nextVersionNumber =
+        revisions.length > 0 ? Math.max(...revisions.map((r) => r.versionNumber)) + 1 : 2;
+      await restoreCareRecordRevision({
+        actor: profile,
+        currentRecord: selectedRecord,
+        revision,
+        nextVersionNumber,
+        restoreReason,
+      });
+      setFormat(revision.format);
+      setShift(revision.shift);
+      setFocusTitle(revision.focusTitle);
+      setVitals(revision.vitals);
+      setSoap(revision.soap);
+      setDart(revision.dart);
+      if (revision.signatureText) {
+        setCustomSignature(revision.signatureText);
+      }
+      setIsAmendingSigned(false);
+      setShowAmendPrompt(false);
+      await deleteLocalDraft(selectedRecord.recordId);
+      setFeedback({
+        type: 'success',
+        text: `已快速還原至 v${revision.versionNumber}（${formatDateTime(revision.savedAtMs)}）並保存新版本快照。`,
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        text: err instanceof Error ? err.message : '還原版本失敗，請檢查權限或原因欄位。',
+      });
+    } finally {
+      setRestoringRevisionId(null);
     }
   };
 
@@ -442,10 +527,69 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
       ? selectedRecord.signatureText || selectedRecord.signedByName
       : customSignature;
 
+  const previewRecord = useMemo<CareRecord>(() => {
+    const activePatient = patientMap.get(patientId);
+    const cleanVitals = sanitizeVitals(vitals);
+    const evalResult = evaluateVitalAlerts(cleanVitals);
+    const effectiveStatus: CareRecordStatus = isAmendingSigned
+      ? 'signed'
+      : selectedRecord?.status || (evalResult.hasAlert ? 'alert' : 'draft');
+    return {
+      recordId: selectedRecord?.recordId || 'preview_draft',
+      patientId: activePatient?.patientId || patientId || 'preview_patient',
+      patientName: activePatient?.fullName || selectedRecord?.patientName || '（未選擇病患）',
+      mrn: activePatient?.mrn || selectedRecord?.mrn || '—',
+      bedNumber: activePatient?.bedNumber || selectedRecord?.bedNumber || '—',
+      format,
+      shift,
+      focusTitle: focusTitle || '（尚未填寫護理焦點）',
+      status: effectiveStatus,
+      assignedNurseIds: activePatient?.assignedNurseIds || selectedRecord?.assignedNurseIds || [profile.uid],
+      authorId: selectedRecord?.authorId || profile.uid,
+      authorName: selectedRecord?.authorName || profile.displayName,
+      signedBy: selectedRecord?.signedBy || (effectiveStatus === 'signed' ? profile.uid : ''),
+      signedByName:
+        selectedRecord?.signedByName || (effectiveStatus === 'signed' ? profile.displayName : ''),
+      signatureText: activeSignaturePreview || profile.signatureText || profile.displayName,
+      signedAtMs: selectedRecord?.signedAtMs || Date.now(),
+      amendmentReason:
+        (isAmendingSigned ? amendmentReason : selectedRecord?.amendmentReason) || '',
+      amendedBy: selectedRecord?.amendedBy || '',
+      amendedByName:
+        (isAmendingSigned ? profile.displayName : selectedRecord?.amendedByName) || '',
+      amendedAtMs:
+        (isAmendingSigned ? Date.now() : selectedRecord?.amendedAtMs) || 0,
+      vitals: cleanVitals,
+      soap,
+      dart,
+      hasAlert: evalResult.hasAlert,
+      alertReason: evalResult.reasons.join('、'),
+      offlineOriginId: selectedRecord?.offlineOriginId || 'preview',
+      recordedAtMs,
+    };
+  }, [
+    patientMap,
+    patientId,
+    vitals,
+    isAmendingSigned,
+    selectedRecord,
+    format,
+    shift,
+    focusTitle,
+    profile.uid,
+    profile.displayName,
+    profile.signatureText,
+    activeSignaturePreview,
+    amendmentReason,
+    soap,
+    dart,
+    recordedAtMs,
+  ]);
+
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+    <div className="flex flex-col xl:flex-row gap-6 items-start">
       {/* Left List Pane */}
-      <aside className="xl:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col">
+      <aside className="w-full xl:w-[270px] shrink-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col">
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -603,8 +747,8 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
         </div>
       </aside>
 
-      {/* Right Editor Pane */}
-      <section className="xl:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-6">
+      {/* Center Editor Pane */}
+      <section className="w-full xl:flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
           <div>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
@@ -624,6 +768,28 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowPrintPreview(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-teal-800 dark:text-teal-200 bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800 rounded-lg hover:bg-teal-100 dark:hover:bg-teal-900/50 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              預覽列印格式
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowHistorySidebar((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap ${
+                showHistorySidebar
+                  ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 border-slate-900 dark:border-slate-100'
+                  : 'bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              歷史版本{selectedRecord ? ` (${revisions.length})` : ''}
+            </button>
+
             {selectedRecord && (
               <>
                 <button
@@ -882,7 +1048,7 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
               </span>
             )}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 2xl:grid-cols-7 gap-3">
             {[
               { key: 'temperature', label: '體溫 (°C)', step: '0.1', min: 30, max: 45 },
               { key: 'heartRate', label: '脈搏 (bpm)', step: '1', min: 20, max: 250 },
@@ -1100,6 +1266,33 @@ export const RecordWorkspaceView: React.FC<RecordWorkspaceViewProps> = ({
           )}
         </div>
       </section>
+
+      {/* Right Version History Sidebar */}
+      {showHistorySidebar && (
+        <div className="w-full xl:w-[296px] shrink-0">
+          <RecordHistorySidebar
+            selectedRecord={selectedRecord}
+            revisions={revisions}
+            canWrite={canWrite}
+            restoringId={restoringRevisionId}
+            onRestoreRevision={handleRestoreRevision}
+            onClose={() => setShowHistorySidebar(false)}
+          />
+        </div>
+      )}
+
+      {/* Print Preview Modal */}
+      <PrintPreviewModal
+        open={showPrintPreview}
+        record={previewRecord}
+        patient={patientMap.get(patientId)}
+        exporterName={profile.displayName}
+        defaultPrivacyMask={privacyMask}
+        canExportSavedFile={Boolean(selectedRecord)}
+        exporting={exporting}
+        onClose={() => setShowPrintPreview(false)}
+        onExport={(kind) => handleExport(kind, false)}
+      />
     </div>
   );
 };

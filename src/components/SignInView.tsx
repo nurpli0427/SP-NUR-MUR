@@ -1,13 +1,21 @@
 import React, { useState } from 'react';
-import { LockKeyhole, ShieldCheck, Stethoscope } from 'lucide-react';
+import { ExternalLink, LockKeyhole, ShieldCheck, Stethoscope } from 'lucide-react';
 
 interface SignInViewProps {
   onSignIn: () => Promise<void>;
+  onSignInRedirect: () => Promise<void>;
   error: string | null;
+  popupBlocked: boolean;
 }
 
-export const SignInView: React.FC<SignInViewProps> = ({ onSignIn, error }) => {
+export const SignInView: React.FC<SignInViewProps> = ({
+  onSignIn,
+  onSignInRedirect,
+  error,
+  popupBlocked,
+}) => {
   const [loading, setLoading] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
 
   const handleClick = async () => {
     setLoading(true);
@@ -15,6 +23,15 @@ export const SignInView: React.FC<SignInViewProps> = ({ onSignIn, error }) => {
       await onSignIn();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRedirectClick = async () => {
+    setRedirecting(true);
+    try {
+      await onSignInRedirect();
+    } finally {
+      setRedirecting(false);
     }
   };
 
@@ -63,21 +80,38 @@ export const SignInView: React.FC<SignInViewProps> = ({ onSignIn, error }) => {
           </div>
 
           {error && (
-            <div className="p-3.5 text-sm text-red-800 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg">
-              {error}
+            <div className="p-3.5 text-sm text-red-800 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg space-y-2">
+              <div>{error}</div>
+              {popupBlocked && (
+                <div className="text-xs text-red-700 dark:text-red-300/90 leading-relaxed">
+                  排查建議：點擊瀏覽器網址列右側「封鎖彈出式視窗」圖示並設為「永遠允許」，或使用下方「改用整頁跳轉登入」（適用於獨立瀏覽器分頁與 Vercel 部署網址）。
+                </div>
+              )}
             </div>
           )}
 
-          <div className="pt-2 flex flex-wrap items-center gap-4">
+          <div className="pt-2 flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={handleClick}
-              disabled={loading}
+              onClick={() => void handleClick()}
+              disabled={loading || redirecting}
               className="inline-flex items-center justify-center gap-2.5 px-6 py-3 text-sm font-semibold text-white bg-teal-700 hover:bg-teal-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
             >
               <LockKeyhole className="w-4 h-4" />
               {loading ? '正在驗證臨床帳號...' : '使用 Google 醫療人員帳號登入'}
             </button>
+
+            {popupBlocked && (
+              <button
+                type="button"
+                onClick={() => void handleRedirectClick()}
+                disabled={loading || redirecting}
+                className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-teal-800 dark:text-teal-200 bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800 hover:bg-teal-100 dark:hover:bg-teal-900/50 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <ExternalLink className="w-4 h-4" />
+                {redirecting ? '正在導向 Google 驗證頁...' : '改用整頁跳轉登入 (Redirect)'}
+              </button>
+            )}
           </div>
         </div>
 
