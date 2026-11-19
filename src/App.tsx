@@ -102,6 +102,8 @@ export default function App() {
     getPushPermissionState()
   );
 
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+
   // Sync dark mode class on <html>
   useEffect(() => {
     const root = document.documentElement;
@@ -112,10 +114,28 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Complete any pending signInWithRedirect result
+  // Surface a manual recovery option if initialization takes longer than 4 seconds
   useEffect(() => {
+    if (authReady && redirectChecked) return;
+    const timer = window.setTimeout(() => {
+      setLoadingTimedOut(true);
+    }, 4000);
+    return () => window.clearTimeout(timer);
+  }, [authReady, redirectChecked]);
+
+  // Complete any pending signInWithRedirect result (with 3.5s timeout guard)
+  useEffect(() => {
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        setRedirectChecked(true);
+      }
+    }, 3500);
+
     void getRedirectResult(auth)
       .then((result) => {
+        if (settled) return;
         const attempted = sessionStorage.getItem('carenote_redirect_attempted') === '1';
         if (result?.user) {
           sessionStorage.removeItem('carenote_redirect_attempted');
@@ -129,6 +149,7 @@ export default function App() {
         }
       })
       .catch((err) => {
+        if (settled) return;
         sessionStorage.removeItem('carenote_redirect_attempted');
         const code = (err as { code?: string })?.code || '';
         if (code === 'auth/unauthorized-domain') {
@@ -140,22 +161,57 @@ export default function App() {
         }
       })
       .finally(() => {
-        setRedirectChecked(true);
+        window.clearTimeout(timeoutId);
+        if (!settled) {
+          settled = true;
+          setRedirectChecked(true);
+        }
       });
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
-  // Listen to Firebase Auth state
+  // Listen to Firebase Auth state (with 5s safety fallback so loading never stalls)
   useEffect(() => {
+    let active = true;
+    const fallbackTimer = window.setTimeout(() => {
+      if (active) {
+        setAuthReady(true);
+      }
+    }, 5000);
+
     const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!active) return;
+      window.clearTimeout(fallbackTimer);
       setFirebaseUser(user);
       if (user) {
+        const isBootstrap =
+          user.email?.toLowerCase() === 'nurpli0427@gmail.com' && user.emailVerified;
+        const fallbackProfile: UserProfile = {
+          uid: user.uid,
+          displayName: user.displayName || user.email?.split('@')[0] || '特別護理師',
+          email: user.email || '',
+          role: isBootstrap ? 'head_nurse' : 'special_nurse',
+          department: isBootstrap ? '特護督導中心' : '重症特別護理組',
+          licenseNo: '',
+          signatureText: `特別護理師 ${user.displayName || user.email?.split('@')[0] || '護理師'} RN`,
+          pushEnabled: true,
+        };
+
         try {
-          const userProfile = await ensureUserProfile(user);
+          const userProfile = await Promise.race<UserProfile>([
+            ensureUserProfile(user),
+            new Promise<UserProfile>((resolve) => {
+              window.setTimeout(() => resolve(fallbackProfile), 6000);
+            }),
+          ]);
+          if (!active) return;
           setProfile(userProfile);
           setAuthError(null);
           setPopupBlocked(false);
           setRedirectCookieBlocked(false);
         } catch (err) {
+          if (!active) return;
           setAuthError(err instanceof Error ? err.message : '載入使用者權限失敗');
         }
       } else {
@@ -166,9 +222,16 @@ export default function App() {
         setStaffList([]);
         setAuditLogs([]);
       }
-      setAuthReady(true);
+      if (active) {
+        setAuthReady(true);
+      }
     });
-    return () => unsub();
+
+    return () => {
+      active = false;
+      window.clearTimeout(fallbackTimer);
+      unsub();
+    };
   }, []);
 
   const isBootstrappedAdmin = Boolean(
@@ -317,10 +380,22 @@ export default function App() {
 
   if (!authReady || !redirectChecked) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="text-sm text-slate-500 dark:text-slate-400">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="text-sm text-slate-600 dark:text-slate-300">
           正在連線至臨床資料庫與驗證安全權限...
         </div>
+        {loadingTimedOut && (
+          <button
+            type="button"
+            onClick={() => {
+              setAuthReady(true);
+              setRedirectChecked(true);
+            }}
+            className="px-4 py-2 text-xs font-medium text-teal-800 dark:text-teal-200 bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800 hover:bg-teal-100 rounded-lg transition-colors cursor-pointer"
+          >
+            連線時間較長，點擊略過等待並繼續
+          </button>
+        )}
       </div>
     );
   }
