@@ -9,7 +9,11 @@
       "destination": "https://sp-nur-mur.firebaseapp.com/__/auth/$1"
     },
     {
-      "source": "/((?!__/auth/|assets/|src/assets/|sw\\.js|registerSW\\.js|workbox-.*|manifest\\.webmanifest|icon\\.svg|apple-touch-icon\\.png|pwa-.*\\.png|favicon\\.ico).*)",
+      "source": "/__/firebase/(.*)",
+      "destination": "https://sp-nur-mur.firebaseapp.com/__/firebase/$1"
+    },
+    {
+      "source": "/((?!__/auth/|__/firebase/|assets/|src/assets/|sw\\.js|registerSW\\.js|workbox-.*|manifest\\.webmanifest|icon\\.svg|apple-touch-icon\\.png|pwa-.*\\.png|favicon\\.ico).*)",
       "destination": "/index.html"
     }
   ],

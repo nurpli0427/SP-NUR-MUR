@@ -10,7 +10,9 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const useSameOriginAuth =
-  import.meta.env.VITE_USE_SAME_ORIGIN_AUTH === 'true' && typeof window !== 'undefined';
+  typeof window !== 'undefined' &&
+  (import.meta.env.VITE_USE_SAME_ORIGIN_AUTH === 'true' ||
+    window.location.hostname === 'sp-nur-mur.vercel.app');
 
 const resolvedFirebaseConfig = {
   ...firebaseConfig,

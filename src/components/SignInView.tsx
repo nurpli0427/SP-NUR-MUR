@@ -8,6 +8,7 @@ interface SignInViewProps {
   popupBlocked: boolean;
   redirectCookieBlocked: boolean;
   isEmbeddedIframe: boolean;
+  activeAuthDomain: string;
 }
 
 export const SignInView: React.FC<SignInViewProps> = ({
@@ -17,9 +18,13 @@ export const SignInView: React.FC<SignInViewProps> = ({
   popupBlocked,
   redirectCookieBlocked,
   isEmbeddedIframe,
+  activeAuthDomain,
 }) => {
   const [loading, setLoading] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+
+  const currentHost = typeof window !== 'undefined' ? window.location.host : '';
+  const isCrossOriginAuth = Boolean(activeAuthDomain && currentHost && activeAuthDomain !== currentHost);
 
   const handleClick = async () => {
     setLoading(true);
@@ -90,14 +95,19 @@ export const SignInView: React.FC<SignInViewProps> = ({
                 <div className="text-xs text-red-700 dark:text-red-300/90 leading-relaxed space-y-1">
                   <div>請擇一方式完成驗證：</div>
                   <div>1. 點擊瀏覽器網址列或網站設定，允許此網站「彈出式視窗」，再重新點擊下方「使用 Google 醫療人員帳號登入」（彈窗模式不依賴跨站 Cookie）。</div>
-                  <div>2. 若使用 Safari / iOS 或隱私防護瀏覽器，請暫時關閉「防止跨網站追蹤／封鎖第三方 Cookie」，或使用同網域 Auth Proxy 模式（於 Vercel 設定 VITE_USE_SAME_ORIGIN_AUTH=true）。</div>
+                  <div>2. 若目前開啟的是 Vercel 正式網址（sp-nur-mur.vercel.app），請確認已將最新程式碼重新部署至 Vercel，系統將自動改用同網域驗證。</div>
                 </div>
               )}
               {popupBlocked && !redirectCookieBlocked && (
                 <div className="text-xs text-red-700 dark:text-red-300/90 leading-relaxed">
                   {isEmbeddedIframe
                     ? '提示：內嵌預覽視窗受瀏覽器安全限制容易攔截彈窗，建議點擊下方「在新分頁開啟並登入」，系統將自動切換為獨立分頁驗證。'
-                    : '提示：請於瀏覽器網址列右側點擊「封鎖彈出式視窗」圖示並設為「永遠允許」，或點擊下方「改用整頁跳轉登入 (Redirect)」。'}
+                    : '提示：請於瀏覽器網址列右側點擊「封鎖彈出式視窗」圖示並設為「永遠允許」，再點擊主登入按鈕；或改用下方整頁跳轉登入。'}
+                </div>
+              )}
+              {(popupBlocked || redirectCookieBlocked) && isCrossOriginAuth && (
+                <div className="pt-1 border-t border-red-200/70 dark:border-red-800/60 text-xs text-red-700/80 dark:text-red-300/80">
+                  目前網站網域：{currentHost}（驗證網域仍為跨站 {activeAuthDomain}）
                 </div>
               )}
             </div>

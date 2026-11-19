@@ -252,6 +252,7 @@ export default function App() {
   })();
 
   const handleSignIn = async () => {
+    const previouslyRedirectBlocked = redirectCookieBlocked;
     setAuthError(null);
     setPopupBlocked(false);
     setRedirectCookieBlocked(false);
@@ -263,7 +264,8 @@ export default function App() {
         code === 'auth/popup-blocked' ||
         code === 'auth/operation-not-supported-in-this-environment'
       ) {
-        if (!isEmbeddedIframe) {
+        const isSameOriginAuth = auth.app.options.authDomain === window.location.host;
+        if (!isEmbeddedIframe && (!previouslyRedirectBlocked || isSameOriginAuth)) {
           try {
             sessionStorage.setItem('carenote_redirect_attempted', '1');
             await signInWithRedirect(auth, googleProvider);
@@ -281,7 +283,9 @@ export default function App() {
         }
         setPopupBlocked(true);
         setAuthError(
-          '目前預覽內嵌視窗的彈出視窗遭瀏覽器封鎖（auth/popup-blocked）。請於瀏覽器網址列右側點擊「允許彈出式視窗」後重試，或點擊下方「在新分頁開啟並登入」。'
+          isEmbeddedIframe
+            ? '目前預覽內嵌視窗的彈出視窗遭瀏覽器封鎖（auth/popup-blocked）。請於瀏覽器網址列右側點擊「允許彈出式視窗」後重試，或點擊下方「在新分頁開啟並登入」。'
+            : '瀏覽器仍封鎖彈出式視窗，且跨網域跳轉憑證受阻。請先在瀏覽器網址列／網站設定將此網站的「彈出式視窗」設為「永遠允許」，再點擊主登入按鈕。'
         );
       } else if (code === 'auth/unauthorized-domain') {
         setAuthError(
@@ -349,6 +353,7 @@ export default function App() {
           popupBlocked={popupBlocked}
           redirectCookieBlocked={redirectCookieBlocked}
           isEmbeddedIframe={isEmbeddedIframe}
+          activeAuthDomain={auth.app.options.authDomain || ''}
         />
       </ErrorBoundary>
     );
